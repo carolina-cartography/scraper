@@ -9,6 +9,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "axios": "^0.21.1"
+    "axios": "^0.21.1",
+    "build-url": "^6.0.1",
+    "jquery": "^3.5.1",
+    "jsdom": "^16.4.0"
   }
 }
