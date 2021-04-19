@@ -9,7 +9,7 @@ const querystring = require('querystring');
 const AIRBNB_CLASSES = {
     listing: "_8ssblpx",
     title: "_bzh5lkq",
-    link: "_gjfol0",
+    link: "_mm360j",
     price: "_olc9rf0",
     roomDetails: "_tqmy57",
     roomDetailsTitle: "_xcsyj0",
