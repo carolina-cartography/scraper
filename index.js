@@ -14,6 +14,8 @@ const AIRBNB_CLASSES = {
     roomDetails: "_tqmy57",
     roomDetailsTitle: "_xcsyj0",
     reviewsButton: "_13e0raay",
+    reviewsDialog: "_16hs373",
+    review: "_1gjypya",
     roomMap: "_384m8u",
 }
 
@@ -175,6 +177,13 @@ async function scrapeListingData(filename) {
 
                 return true
             }
+        })
+
+        await page.waitForSelector(airbnbClass("reviewsButton"))
+        await page.click(airbnbClass("reviewsButton"))
+        await page.waitForSelector(airbnbClass("review"))
+        await page.$$(airbnbClass("review"), reviews => {
+            console.log(reviews)
         })
 
         listingsMap[id].scraped = true;
