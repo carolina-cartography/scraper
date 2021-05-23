@@ -17,7 +17,8 @@ const AIRBNB_CLASSES = {
     roomDetailsTitle: "_xcsyj0",
     reviewsButtonContainer: "_19qg1ru",
     reviewsButton: "_13e0raay",
-    review: "_1gjypya",
+    overlayReview: "_1gjypya",
+    mainPageReview: "_50mnu4",
     reviewDate: "_1ixuu7m",
     roomMap: "_384m8u",
 }
@@ -31,6 +32,24 @@ function airbnbClass(name) {
 function sleep(ms) {
     return new Promise((resolve) => {
         setTimeout(resolve, ms)
+    })
+}
+
+async function processReviewsList(reviews, listing) {
+    return new Promise(async (resolve) => {
+        let moments = [];
+        for (var review of reviews) {
+            let dateString = await review.$eval(airbnbClass("reviewDate"), el => el.innerText)
+            let dateMoment = Moment(dateString, "MMMM YYYY")
+            moments.push(dateMoment.format("X"))
+        }
+        moments.sort()
+        listing.numReviews = reviews.length;
+        listing.firstReviewTimestamp = moments[0]
+        listing.firstReview = Moment(moments[0], "X").format("MMMM YYYY")
+        listing.lastReviewTimestamp = moments[moments.length-1]
+        listing.lastReview = Moment(moments[moments.length-1], "X").format("MMMM YYYY")
+        resolve()
     })
 }
 
@@ -124,8 +143,8 @@ async function scrapeListingData(filename) {
     for (let i in listingKeys) {
         let id = listingKeys[i]
 
-        // Don't scrape individual listing if already scraped
-        if (listingsMap[id].scraped) {
+        // Don't scrape individual listing if already complete
+        if (listingsMap[id].complete && listingsMap[id].guests) {
             continue
         }
 
@@ -143,9 +162,9 @@ async function scrapeListingData(filename) {
             await page.waitForSelector(airbnbClass("roomDetails"), { timeout: 5000 })
             let detailsText = await page.$eval(airbnbClass("roomDetails"), el => el.textContent)
             let detailsTitleText = await page.$eval(airbnbClass("roomDetailsTitle"), el => el.textContent)
-            let detailsTitleComponents = detailsTitleText.split(" hosted by ")
-            listingsMap[id].type = detailsTitleComponents[0]
-            listingsMap[id].host = detailsTitleComponents[1]
+            let detailsTitleComponents = detailsTitleText.split("hosted by")
+            listingsMap[id].type = detailsTitleComponents[0].trim()
+            listingsMap[id].host = detailsTitleComponents[1].trim()
             let remainingDetailsText = detailsText.replace(detailsTitleText, '')
             let remainingDetailsArray = remainingDetailsText.split(" · ")
             for (let detail of remainingDetailsArray) {
@@ -203,49 +222,68 @@ async function scrapeListingData(filename) {
         }
 
         console.log("Save reviews metadata...")
+        let savedReviews = [];
         try {
+            // Look for "Show all reviews" button, click it
             await page.waitForSelector(airbnbClass("reviewsButtonContainer"), { timeout: 5000 })
             await page.click(`${airbnbClass("reviewsButtonContainer")} ${airbnbClass("reviewsButton")}`)
-            await page.waitForSelector(airbnbClass("review"))
+
+            // Get all reviews from overlay by scrolling down until exhausted
+            console.log("Loading paged reviews...")
+            await page.waitForSelector(airbnbClass("overlayReview"))
             await new Promise(async (resolve) => {
-                let originalReviewsCount = 0
-                let allReviews = [];
+                let reviewsCount = 0
                 while (true) {
-                    originalReviewsCount = allReviews.length
-                    await page.$$(airbnbClass("review")).then(reviews => {
-                        allReviews = reviews
+
+                    // Set count to number of reviews at start of iteration
+                    reviewsCount = savedReviews.length
+
+                    // Save reviews in overlay
+                    await page.$$(airbnbClass("overlayReview")).then(reviews => {
+                        savedReviews = reviews
                         return true
                     })
-                    await page.$$eval(airbnbClass("review"), reviews => {
+
+                    // Scroll down to the bottom of the reviews page
+                    await page.$$eval(airbnbClass("overlayReview"), reviews => {
                         reviews[reviews.length - 1].scrollIntoView()
                         return true
                     })
+
+                    // Wait half a second
                     await sleep(500)
-                    if (allReviews.length == originalReviewsCount) {
+
+                    // If there are more reviews than there were, keep iterating
+                    if (savedReviews.length == reviewsCount) {
                         break
                     }
-                    console.log(`Scrolled to ${allReviews.length} reviews...`)
+
+                    console.log(`Scrolled to ${savedReviews.length} reviews...`)
                 }
-                let moments = [];
-                for (var review of allReviews) {
-                    let dateString = await review.$eval(airbnbClass("reviewDate"), el => el.innerText)
-                    let dateMoment = Moment(dateString, "MMMM YYYY")
-                    moments.push(dateMoment.format("X"))
-                }
-                moments.sort()
-                listingsMap[id].numReviews = allReviews.length;
-                listingsMap[id].firstReviewTimestamp = moments[0]
-                listingsMap[id].firstReview = Moment(moments[0], "X").format("MMMM YYYY")
-                listingsMap[id].lastReviewTimestamp = moments[moments.length-1]
-                listingsMap[id].lastReview = Moment(moments[moments.length-1], "X").format("MMMM YYYY")
                 resolve();
             })
         } catch (err) {
-            console.log("No reviews for listing!")
-            listingsMap[id].numReviews = 0
-        }
+            // If "Show all reviews" button not found...
 
-        listingsMap[id].scraped = true;
+            // Look for reviews on listing page
+            try {
+                await page.waitForSelector(airbnbClass("mainPageReview"), { timeout: 5000 })
+                console.log("Scraping reviews from listing page...")
+                await page.$$(airbnbClass("mainPageReview")).then(reviews => {
+                    console.log(reviews)
+                    savedReviews = reviews
+                    return true
+                })
+            } catch (err) {
+                console.log("No reviews found")
+            }
+        }
+        if (savedReviews.length > 0) {
+            await processReviewsList(savedReviews, listingsMap[id])
+        }
+        
+        // Mark listing as complete
+        listingsMap[id].complete = true;
 
         // Write data to file before iterating
         fs.writeFileSync(filename, JSON.stringify(listingsMap, null, 2))
@@ -265,13 +303,14 @@ async function exportListingData(filename) {
 
     // Push objects into array
     for (var key of listingKeys) {
+        listingsMap[key].url = `https://www.airbnb.com/rooms/${key}`
         listingsArray.push(listingsMap[key])
     }
 
     let csvString = Papaparse.unparse(listingsArray, {
         columns: [
             "title", "price", "lat", "lng", "type", "host", "guests", "bedrooms", "beds", "baths", "numReviews",
-            "firstReview", "firstReviewTimestamp", "lastReview", "lastReviewTimestamp",
+            "firstReview", "firstReviewTimestamp", "lastReview", "lastReviewTimestamp", "url"
         ]
     })
     
