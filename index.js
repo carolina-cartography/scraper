@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 const Axios = require("axios");
 const { JSDOM } = require("jsdom");
 const jQuery = require("jquery");
@@ -7,6 +9,7 @@ const Puppeteer = require("puppeteer");
 const Querystring = require('querystring');
 const Moment = require("moment");
 const Papaparse = require("papaparse");
+const Yargs = require("yargs/yargs");
 
 const AIRBNB_CLASSES = {
     listing: "_8ssblpx",
@@ -23,8 +26,6 @@ const AIRBNB_CLASSES = {
     roomMap: "_384m8u",
 }
 
-const AIRBNB_QUERY_URL_NAME = "Vieques--Puerto-Rico"
-
 function airbnbClass(name) {
     return "."+AIRBNB_CLASSES[name]
 }
@@ -35,7 +36,31 @@ function sleep(ms) {
     })
 }
 
-async function processReviewsList(reviews, listing) {
+function exportAirbnbListingData(filename) {
+
+    // Read from file
+    let listingsMap = JSON.parse(fs.readFileSync(filename+".json", 'utf8'))
+    let listingKeys = Object.keys(listingsMap)
+    let listingsArray = []
+
+    // Push objects into array
+    for (var key of listingKeys) {
+        listingsMap[key].url = `https://www.airbnb.com/rooms/${key}`
+        listingsArray.push(listingsMap[key])
+    }
+
+    let csvString = Papaparse.unparse(listingsArray, {
+        columns: [
+            "title", "price", "lat", "lng", "type", "host", "guests", "bedrooms", "beds", "baths", "numReviews",
+            "firstReview", "firstReviewTimestamp", "lastReview", "lastReviewTimestamp", "url"
+        ]
+    })
+    
+    // Save to file
+    fs.writeFileSync(filename+".csv", csvString)
+}
+
+async function processAirbnbReviewsList(reviews, listing) {
     return new Promise(async (resolve) => {
         let moments = [];
         for (var review of reviews) {
@@ -53,7 +78,7 @@ async function processReviewsList(reviews, listing) {
     })
 }
 
-async function scrapeListings(filename) {
+async function scrapeAirbnbListings(query, filename) {
 
     // Initialize an object to store our formatted scrape data
     let listingsMap = {};
@@ -65,7 +90,7 @@ async function scrapeListings(filename) {
 
         // Setup an Airbnb URL using the 'build-url' package
         let url = BuildURL("https://www.airbnb.com/", {
-            path: `s/${AIRBNB_QUERY_URL_NAME}/homes`,
+            path: `s/${query}/homes`,
             queryParams: {
                 "search_type": "pagination",
                 "items_offset": offset,
@@ -127,16 +152,16 @@ async function scrapeListings(filename) {
 
     console.log(`Scraped a total of ${Object.keys(listingsMap).length} listings!`)
 
-    fs.writeFileSync(filename, JSON.stringify(listingsMap, null, 2))
+    fs.writeFileSync(filename+".json", JSON.stringify(listingsMap, null, 2))
 }
 
-async function scrapeListingData(filename) {
+async function scrapeAirbnbListingData(filename) {
 
     // Initialize a Puppeteer instance
     const browser = await Puppeteer.launch()
 
     // Read from file
-    let listingsMap = JSON.parse(fs.readFileSync(filename, 'utf8'))
+    let listingsMap = JSON.parse(fs.readFileSync(filename+".json", 'utf8'))
     let listingKeys = Object.keys(listingsMap)
 
     // Iterate through listings...
@@ -279,14 +304,14 @@ async function scrapeListingData(filename) {
             }
         }
         if (savedReviews.length > 0) {
-            await processReviewsList(savedReviews, listingsMap[id])
+            await processAirbnbReviewsList(savedReviews, listingsMap[id])
         }
         
         // Mark listing as complete
         listingsMap[id].complete = true;
 
         // Write data to file before iterating
-        fs.writeFileSync(filename, JSON.stringify(listingsMap, null, 2))
+        fs.writeFileSync(filename+".json", JSON.stringify(listingsMap, null, 2))
         
         page.close()
     }
@@ -294,46 +319,32 @@ async function scrapeListingData(filename) {
     browser.close()
 }
 
-async function exportListingData(filename) {
-
-    // Read from file
-    let listingsMap = JSON.parse(fs.readFileSync(filename, 'utf8'))
-    let listingKeys = Object.keys(listingsMap)
-    let listingsArray = []
-
-    // Push objects into array
-    for (var key of listingKeys) {
-        listingsMap[key].url = `https://www.airbnb.com/rooms/${key}`
-        listingsArray.push(listingsMap[key])
+async function airbnbScrapeHandler({ query, filename, reset }) {
+    const jsonExists = fs.existsSync(filename+".json")
+    if (!jsonExists || reset) {
+        await scrapeAirbnbListings(query, filename)
     }
-
-    let csvString = Papaparse.unparse(listingsArray, {
-        columns: [
-            "title", "price", "lat", "lng", "type", "host", "guests", "bedrooms", "beds", "baths", "numReviews",
-            "firstReview", "firstReviewTimestamp", "lastReview", "lastReviewTimestamp", "url"
-        ]
-    })
-    
-    // Save to file
-    let csvFilename = filename.replace(".json", ".csv")
-    fs.writeFileSync(csvFilename, csvString)
+    await scrapeAirbnbListingData(filename);
+    exportAirbnbListingData(filename);
 }
 
-async function run() {
-
-    var args = process.argv.slice(2);
-    let filename = args[0]
-    let listingsAlreadyScraped = args[1] === "true"
-
-    if (filename === undefined) {
-        throw("You must provide a filename")
-    }
-
-    if (!listingsAlreadyScraped) {
-        await scrapeListings(filename);
-    }
-    scrapeListingData(filename);
-    exportListingData(filename);
-}
-
-run()
+var argv = Yargs(process.argv.slice(2))
+    .command("airbnb", "Produces JSON and CSV data for an Airbnb query", {
+        "query": {
+            "type": "string",
+            "description": "The URL-encoded place identifier of your Airbnb query, like 'location' in 'https://airbnb.com/s/location/homes'",
+            "demandOption": true,
+        },
+        "filename": {
+            "type": "string",
+            "description": "The filename used to save JSON and CSV data for your scrape. Do not include an extension.",
+            "demandOption": true,
+        },
+        "reset": {
+            "type": "boolean",
+            "description": "Tells the scraper to start from the beginning instead of attempting to pick up where it left off."
+        },
+    }, airbnbScrapeHandler)
+    .demand(1, "Please specify a command")
+    .help()
+    .argv
