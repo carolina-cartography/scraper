@@ -144,7 +144,7 @@ async function scrapeListingData(filename) {
         let id = listingKeys[i]
 
         // Don't scrape individual listing if already complete
-        if (listingsMap[id].complete && listingsMap[id].guests) {
+        if (listingsMap[id].complete) {
             continue
         }
 
