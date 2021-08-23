@@ -12,7 +12,7 @@ const Papaparse = require("papaparse");
 const Yargs = require("yargs/yargs");
 
 const AIRBNB_CLASSES = {
-    listing: "_8ssblpx",
+    listing: "_1kmzzkf",
     title: "_bzh5lkq",
     link: "_mm360j",
     price: "_olc9rf0",
