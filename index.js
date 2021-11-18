@@ -13,16 +13,16 @@ const Yargs = require("yargs/yargs");
 
 const AIRBNB_CLASSES = {
     listing: "_1kmzzkf",
-    title: "_bzh5lkq",
+    title: "_im5s6sq",
     link: "_mm360j",
-    price: "_olc9rf0",
+    price: "_tyxjp1",
     roomDetails: "_tqmy57",
     roomDetailsTitle: "_xcsyj0",
-    reviewsButtonContainer: "_19qg1ru",
-    reviewsButton: "_13e0raay",
-    overlayReview: "_1gjypya",
-    mainPageReview: "_50mnu4",
-    reviewDate: "_1ixuu7m",
+    reviewsButtonContainer: "sijjzz2",
+    reviewsButton: "b1sec48q",
+    overlayReview: "r1are2x1",
+    mainPageReview: "_162hp8xh",
+    reviewDate: "s189e1ab",
     roomMap: "_384m8u",
 }
 
@@ -83,6 +83,9 @@ async function scrapeAirbnbListings(query, filename) {
     // Initialize an object to store our formatted scrape data
     let listingsMap = {};
 
+    // Initialize a Puppeteer browser and page
+    const browser = await Puppeteer.launch()
+
     // Run a while loop to get listings until we decide to break out...
     let offset = 0;
     while (true) {
@@ -97,9 +100,13 @@ async function scrapeAirbnbListings(query, filename) {
             }
         })
 
-        // Get page of listings from Airbnb
-        let response = await Axios.get(url)
-        let html = response.data
+        // Initialize new page
+        const page = await browser.newPage()
+
+        // Navigate to URL, wait for results to load
+        console.log("Waiting for page to load...")
+        await page.goto(url, { waitUntil: 'networkidle0' });
+        const html = await page.evaluate(() => document.querySelector('*').outerHTML)
 
         // Make JSDOM instance from HTML, initialize DOM-aware jQuery instance as '$'
         let dom = new JSDOM(html)
@@ -138,6 +145,9 @@ async function scrapeAirbnbListings(query, filename) {
                 }
             }
         }
+
+        // Close page
+        page.close()
 
         // Decide whether to get the next page
         if (newListings > 0) {
@@ -231,6 +241,9 @@ async function scrapeAirbnbListingData(filename) {
                     let swLng = boundingBox.southwest.lng
                     let neLat = boundingBox.northeast.lat
                     let neLng = boundingBox.northeast.lng
+
+                    // Validate query
+                    if (swLat == 0 || swLng == 0 || neLat == 0 || neLng == 0) return false
                     
                     // Calculate center
                     let lat = swLat + ((neLat - swLat) / 2)
@@ -241,7 +254,7 @@ async function scrapeAirbnbListingData(filename) {
 
                     return true
                 }
-            })
+            }, { timeout: 20000 })
         } catch (err) {
             console.log("Could not find location details!")
         }
@@ -250,7 +263,7 @@ async function scrapeAirbnbListingData(filename) {
         let savedReviews = [];
         try {
             // Look for "Show all reviews" button, click it
-            await page.waitForSelector(airbnbClass("reviewsButtonContainer"), { timeout: 5000 })
+            await page.waitForSelector(airbnbClass("reviewsButtonContainer"), { timeout: 8000 })
             await page.click(`${airbnbClass("reviewsButtonContainer")} ${airbnbClass("reviewsButton")}`)
 
             // Get all reviews from overlay by scrolling down until exhausted
@@ -275,8 +288,8 @@ async function scrapeAirbnbListingData(filename) {
                         return true
                     })
 
-                    // Wait half a second
-                    await sleep(500)
+                    // Wait a bit
+                    await sleep(1200)
 
                     // If there are more reviews than there were, keep iterating
                     if (savedReviews.length == reviewsCount) {
@@ -292,7 +305,7 @@ async function scrapeAirbnbListingData(filename) {
 
             // Look for reviews on listing page
             try {
-                await page.waitForSelector(airbnbClass("mainPageReview"), { timeout: 5000 })
+                await page.waitForSelector(airbnbClass("mainPageReview"), { timeout: 8000 })
                 console.log("Scraping reviews from listing page...")
                 await page.$$(airbnbClass("mainPageReview")).then(reviews => {
                     console.log(reviews)
